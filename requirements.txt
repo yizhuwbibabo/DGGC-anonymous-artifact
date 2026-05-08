@@ -1,0 +1,8 @@
+torch>=2.0
+transformers>=4.30
+numpy
+pandas
+scikit-learn
+scipy
+tqdm
+faiss-cpu

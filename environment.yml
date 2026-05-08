@@ -1,0 +1,16 @@
+name: dggc-anonymous
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pytorch
+  - numpy
+  - pandas
+  - scikit-learn
+  - scipy
+  - tqdm
+  - pip
+  - pip:
+      - transformers
+      - faiss-cpu

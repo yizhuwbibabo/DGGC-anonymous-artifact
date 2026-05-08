@@ -1,0 +1,8 @@
+corpus,tables,index_seconds,search_milliseconds
+SANTOS Small,550,0.0001,0.002
+TUS Small,1526,0.0004,0.005
+TUS Large,5044,0.0013,0.006
+SANTOS Large,11065,0.0029,0.041
+WDC Sample,10000,0.0029,0.041
+WDC Sample,100000,0.020,0.396
+WDC Sample,1000000,0.215,3.819

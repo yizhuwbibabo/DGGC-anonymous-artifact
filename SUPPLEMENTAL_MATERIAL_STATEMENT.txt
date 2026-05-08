@@ -1,0 +1,9 @@
+Supplemental Material Statement
+
+The anonymous supplemental package contains source code, configuration files,
+preprocessing and evaluation scripts, and selected result CSV files
+corresponding to the experimental tables in the paper. Public benchmark
+datasets are not redistributed. The package provides the expected directory
+structure and preprocessing instructions. Large intermediate artifacts such as
+checkpoints, embedding caches, and debug logs are not included because they can
+be regenerated from the provided scripts and configurations.
