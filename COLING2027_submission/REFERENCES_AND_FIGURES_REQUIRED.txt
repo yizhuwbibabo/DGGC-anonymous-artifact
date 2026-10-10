@@ -1,0 +1,9 @@
+The five supplied paper figures have been copied into figure/ with their original filenames:
+
+- intro_example.pdf
+- overview.pdf
+- ablation_study.pdf
+- case_study.pdf
+- case_study_epoch.pdf
+
+The supplied sample-base.bib has been cross-checked against the active LaTeX citations. The submission `references.bib` contains the 55 cited entries only. `REFERENCE_CROSSCHECK.md` records the 55 matched keys and the 118 supplied but unused keys.

@@ -1,0 +1,32 @@
+\section{Related Work}
+\label{rel_work}
+
+\subsection{\textbf{Table Union Search}}
+Table Union Search (TUS), also known as entity complement~\cite{das2012finding} or row extension~\cite{yakout2012infogather}, aims to discover tables in data lakes that can be vertically extended with a query table~\cite{nargesian2018table}. Existing approaches can be broadly categorized into overlap-based, semantic-based, and distribution-based methods. 
+
+\noindent\textbf{Overlap-based Approaches.}
+Early work focuses on value overlap. Research~\cite{nargesian2018table} proposes set-unionability using a hypergeometric test to assess domain similarity. PGTUS~\cite{xie2024pgtus} accelerates such matching via proximity graphs, and Juneau~\cite{zhang2019finding} incorporates multi-view signals including row similarity and header distance. However, overlap-based methods struggle with semantically similar but lexically distinct columns.
+
+\noindent\textbf{Semantic-based Approaches.}
+To overcome exact matching limitations, recent studies leverage representation learning. Methods such as Table2Vec~\cite{zhang2019table2vec} and contextual encoders~\cite{pilaluisa2024contextual} map columns into embedding spaces for semantic matching. SANTOS~\cite{khatiwada2023santos} emphasizes relationship semantics across columns, while LifTus~\cite{qiu2025liftus} models multi-aspect features for unseen data lakes. 
+Starmie~\cite{fan2023starmie} introduces contrastive learning into TUS by generating positive views through column dropping and row sampling. While effective, such self-augmentation strategies may treat other unionable tables as negatives, leading to self-referential bias. Moreover, most semantic approaches encode tables and columns as deterministic vectors, which compress complex domains into single points and may overlook distributional specificity.
+
+\noindent\textbf{Distribution-based Approaches.}
+To capture distributional characteristics, probabilistic and geometric methods have been explored. NL-Unionability~\cite{nargesian2018table} models columns as language distributions, and COTER~\cite{yao2023coter} employs Wasserstein distance for refined alignment. Inspired by this perspective, DGGC represents tables and columns as Gaussian distributions, using mean vectors for semantic centers and variance vectors to model semantic specificity.
+
+\iffalse
+\subsection{Table Search}
+Beyond union search, table search includes whole table search and table join search. Structure-aware models such as StruBERT~\cite{trabelsi2022strubert}, MTR~\cite{shraga2020web}, and MGNETS~\cite{chen2021mgnets} encode structural dependencies via attention, convolution, or graph networks. Recent generative approaches leverage differentiable indexing~\cite{guo2025birdie} or large language models~\cite{cui2024tablecopilot} for natural language-driven discovery. 
+For join search, methods such as Juneau~\cite{zhang2019finding}, correlated top-$k$ matching~\cite{pradhan2023searching}, and AugPath~\cite{gong2025let} explore semantic and multi-hop augmentation paths. These studies highlight the increasing importance of semantic representations in data lake retrieval.
+
+\subsection{Semantic Table and Dataset Search}
+Beyond table union search, the Semantic Web community has studied semantic access to tables and datasets from several complementary perspectives. Existing studies link table cells to entities using tabular context~\cite{bhagavatula2015tabel,efthymiou2017matching,cutrona2020tough}, infer table semantics from graph and knowledge base signals~\cite{vu2021graph,qiu2023dependency}, exploit background knowledge for schema matching~\cite{portisch2021background}, and retrieve datasets using metadata or dense ranking models~\cite{benjelloun2020google,chen2023dense}. These works are complementary to this paper, which studies semantic compatibility between query and candidate tables for table union search.
+\fi
+\subsection{Semantic Table and Dataset Search}
+
+Beyond table union search, the Semantic Web community has studied semantic access to tables and datasets from several complementary perspectives. Existing studies link table cells to entities using tabular context~\cite{bhagavatula2015tabel,efthymiou2017matching,cutrona2020tough}, infer table semantics from graph and knowledge base signals~\cite{vu2021graph,qiu2023dependency}, exploit background knowledge for schema matching~\cite{portisch2021background}, and retrieve datasets using metadata or dense ranking models~\cite{benjelloun2020google,chen2023dense}. Beyond semantic access, table search also includes whole-table search and table join search. Structure-aware models such as StruBERT~\cite{trabelsi2022strubert}, MTR~\cite{shraga2020web}, and MGNETS~\cite{chen2021mgnets} encode structural dependencies via attention, convolution, or graph networks. Recent generative approaches further leverage differentiable indexing~\cite{guo2025birdie} or large language models~\cite{cui2024tablecopilot} for natural language-driven table discovery. For join search, methods such as Juneau~\cite{zhang2019finding}, correlated top-$k$ matching~\cite{pradhan2023searching}, and AugPath~\cite{gong2025let} explore semantic and multi-hop augmentation paths. These studies highlight the increasing importance of structural and semantic representations in data lake retrieval. They are complementary to this paper, which focuses on semantic compatibility between query and candidate tables for table union search.
+
+\subsection{Contrastive Learning over Tables}
+Contrastive learning has become a dominant paradigm for table representation learning. Starmie~\cite{fan2023starmie} pioneers its application to table union search by constructing self-augmented positive views. Sudowoodo~\cite{zhang2023sudowoodo} aligns schema and instance representations through self-supervision, and LifTus~\cite{qiu2025liftus} captures fine-grained relationships via hierarchical cross-attention.
+
+However, standard contrastive losses adopt a closed-world assumption in which all non-anchor samples are treated as negatives, potentially repelling valid unionable candidates in dense retrieval settings~\cite{qu2021rocketqa}. Furthermore, contrastive frameworks typically rely on deterministic embeddings that encode only semantic centers. In contrast, DGGC integrates contrastive learning with Gaussian modeling to jointly capture semantic centers and specificity distributions, while constructing inter-table positive pairs to mitigate self-referential bias.

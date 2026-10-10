@@ -1,0 +1,56 @@
+\documentclass[11pt]{article}
+
+% ARR/*ACL review format: anonymous, line-numbered, page-numbered review PDF.
+\usepackage[review]{acl}
+
+\usepackage{times}
+\usepackage{latexsym}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{nicefrac}
+\newcommand{\keywords}[1]{\par\noindent\textbf{Keywords:} {\def\and{; }#1}}
+
+\title{Dual-Granularity Gaussian Contrastive Learning \\for Table Union Search}
+\author{Anonymous Submission}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+The task of table union search aims to retrieve tables that are unionable with a given query table from large tabular repositories such as data lakes. Despite recent advances, existing methods still face two fundamental limitations: 
+(1) the implicit modeling of semantic specificity, where deterministic point embeddings encode only semantic centers while ignoring semantic coverage; and (2) the self-referential bias in contrastive learning, which treats only augmented views as positives and suppresses potentially compatible tables.
+To address these issues, we propose DGGC, a Dual-Granularity Gaussian Contrastive Learning framework for table union search. DGGC represents both tables and columns as Gaussian embeddings, explicitly modeling semantic centers and specificity distributions via mean and variance parameters. We further design a unified objective that integrates Gaussian modeling with contrastive learning under a table–column alignment constraint, ensuring consistency between global and local semantics. In addition, a filter–shuffle sample generator constructs diverse inter-table positive pairs, alleviating the closed-world assumption of standard contrastive learning. Extensive experiments on three real-world table corpora demonstrate that DGGC consistently outperforms state-of-the-art baselines while maintaining efficiency.
+
+\keywords{Table union search \and Gaussian embeddings \and Contrastive learning \and Sample generator \and Semantic specificity}
+\end{abstract}
+
+\input{sections/Introduction}
+\input{sections/Related_Work}
+\input{sections/GaussianCL}
+\input{sections/Experiment}
+\input{sections/Conclusion}
+
+% COLING 2027 requires this section after the conclusion and before references.
+% The existing future-work sentence is reused verbatim; no scientific wording is changed.
+\section{Limitations}
+\input{sections/Limitations}
+
+\paragraph*{Supplemental Material Statement.}
+The anonymous supplemental package contains source code, configuration files,
+preprocessing and evaluation scripts, and selected result CSV files corresponding
+to the experimental tables in the paper. Public benchmark datasets are not
+redistributed; the package provides the expected directory structure and
+preprocessing instructions. If accepted, the package can be released in a public repository with a persistent archive.
+
+\bibliography{references}
+
+\appendix
+\input{appendix/Appendix}
+
+\end{document}
