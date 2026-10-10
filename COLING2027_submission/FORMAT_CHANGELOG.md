@@ -31,13 +31,13 @@ No placeholder bibliography or invented references were added. The 118 supplied 
 ## Figure and table layout changes
 
 - Table-like PDFs (intro_example.pdf and case_study.pdf) are included as
-  single-column figures at \\columnwidth.
+  single-column figures at the column width.
 - Diagram/chart PDFs (overview.pdf, ablation_study.pdf, and
-  case_study_epoch.pdf) are included as two-column figure* floats at
-  \\textwidth (the ablation chart uses .99\\textwidth to remove a
-  float-height overflow warning).
+  case_study_epoch.pdf) are included as two-column figure-star floats at
+  the full text width (the ablation chart uses 99% of the full text width
+  to remove a float-height overflow warning).
 - Every active tabular environment in sections/Experiment.tex is constrained
-  to \\columnwidth with \\resizebox; no table text, numbers, captions, labels,
-  or ordering were changed.
+  to the column width with a resize wrapper; no table text, numbers, captions,
+  labels, or ordering were changed.
 
 See FIGURE_LAYOUT_CHANGELOG.md for the file-by-file audit and build check.
