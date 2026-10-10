@@ -19,6 +19,7 @@ The TUS (Table Union Search) benchmarks \textbf{[x]} are derived from Canadian o
   \centering
   \caption{Statistics of datasets}
   \label{tab:datasets}
+  \resizebox{\columnwidth}{!}{%
   \begin{tabular}{l|ccc|ccc}
     \toprule
     \multirow{2}{*}{\normalsize{Corpus}} & \multicolumn{3}{c}{Data Lake Tables} & \multicolumn{3}{|c}{Query Tables} \\
@@ -32,7 +33,8 @@ The TUS (Table Union Search) benchmarks \textbf{[x]} are derived from Canadian o
     SANTOS Large & 11,090 & 123,477 & 7,675 & 80 & 1017& 7675\\
         WDC (1M) & 1M & $\approx$5M & $\approx$15 & 300 & 3680& 8096\\
     \bottomrule
-  \end{tabular}
+  \end{tabular}%
+  }%
 \end{table}
 
 \noindent\textbf{Baselines.} %参考starmie中的5.1.4节。
@@ -51,6 +53,7 @@ We employ RoBERTa-base~\cite{liu2019roberta} as the backbone. We use AdamW~\cite
   \caption{The performance of table union search. The best results are in bold.}
   \label{overall}
   
+  \resizebox{\columnwidth}{!}{%
   \begin{tabular}{ll|cc|cc|cc}
     \toprule 
     \multicolumn{2}{c|}{\multirow{2}{*}{Method}}&\multicolumn{2}{c|}{SANTOS-Small}&\multicolumn{2}{c|}{TUS-Small}&\multicolumn{2}{c}{TUS-Large}\\
@@ -73,7 +76,8 @@ We employ RoBERTa-base~\cite{liu2019roberta} as the backbone. We use AdamW~\cite
     &only value&.8456&.7089&.9509&.3442&.9375&.3195\\
     &full&\textbf{.9950}&\textbf{.8107}&.9591&\textbf{.3960}&\textbf{.9591}&\textbf{.3610}\\
   \bottomrule
-\end{tabular}
+  \end{tabular}%
+  }%
 \end{table}
 To assess the performance of DGGC in capturing table semantics, we conducted a comparative analysis against state-of-the-art baselines across three standard benchmarks. Table ~\ref{overall} presents the MAP@k and R@k performance. Consistent with the settings in prior literature, we set $k=10$ for the SANTOS-Small benchmark and extended $k=60$ for the TUS benchmarks to accommodate the larger search space. %This experimental design facilitates a comprehensive evaluation of the model's robustness across varying scales, ranging from curated small-scale repositories to extensive, noise-intensive data lakes. 
 
@@ -112,9 +116,9 @@ For the variant without the filter-shuffle sample generator (DGGC w/o FS), we ob
 \fi
 
 \subsection{Ablation Study}
-\begin{figure}[t]
+\begin{figure*}[t]
     \centering
-    \includegraphics[width=\linewidth]{figure/ablation_study.pdf}
+    \includegraphics[width=.99\textwidth]{figure/ablation_study.pdf}
     \caption{
         {Ablation results.} 
         %The top row (a)-(c) reports the MAP@k scores, while the bottom row (d)-(f) reports the R@k  scores on Santos-Small, TUS-Small, and TUS-Large benchmarks, respectively. 
@@ -123,7 +127,7 @@ For the variant without the filter-shuffle sample generator (DGGC w/o FS), we ob
         %DGGC (Full) demonstrates consistent superiority across all metrics and datasets.
     }
     \label{fig:ablation_study}
-\end{figure}
+\end{figure*}
 
 We perform an ablation study to understand the impact of dual-granularity Gaussian embeddings, the Wasserstein-based score, and the filter-shuffle positive sample generator. We compare full DGGC with DGGC w/o FS and DGGC w/o Var, as shown in Figure~\ref{fig:ablation_study}.
 
@@ -337,6 +341,7 @@ The table reports MAP@k and R@k on SANTOS-SMALL, TUS-SMALL, and TUS-LARGE.}
 \footnotesize
 % \setlength{\tabcolsep}{3.5pt}
 % \renewcommand{\arraystretch}{0.9}
+\resizebox{\columnwidth}{!}{%
 \begin{tabular}{l|cc|cc|cc}
 \toprule
 \multirow{2}{*}{Setting}
@@ -371,7 +376,8 @@ The table reports MAP@k and R@k on SANTOS-SMALL, TUS-SMALL, and TUS-LARGE.}
 \(K=80\)  & .9946 & .7980 & .9575 & .3569 & .8926 & .2105 \\
 \(K=\mathrm{all}\) & .9946 & .7980 & .9575 & .3569 & .8927 & .2105 \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}%
 \end{table}
 
 Overall, the results show that the best relation map is neither the strictest nor the densest one. DGGC benefits from retaining sufficiently reliable positive edges while preserving enough graph connectivity for contrastive learning.
@@ -418,6 +424,7 @@ We further investigate the sensitivity of DGGC to the hyperparameter \(\lambda\)
   \footnotesize
   % \setlength{\tabcolsep}{2.8pt}
   % \renewcommand{\arraystretch}{0.88}
+  \resizebox{\columnwidth}{!}{%
   \begin{tabular}{c|cc|cc|cc}
     \toprule 
     \multirow{2}{*}{\(\lambda\)}
@@ -436,7 +443,8 @@ We further investigate the sensitivity of DGGC to the hyperparameter \(\lambda\)
     1.60 & .9903 & .8056 & .9546 & .0762 & .9118 & .0508 \\
     2.00 & .9896 & .8052 & .9528 & .0768 & .9111 & .0508 \\
     \bottomrule
-  \end{tabular}
+  \end{tabular}%
+  }%
 \end{table}
 
 As shown in Table~\ref{eff_lam}, incorporating the variance penalty \((\lambda>0)\) generally yields better performance than using mean-only embeddings \((\lambda=0)\), validating that the distribution-based representation captures semantic specificity for table union search. The optimal value of \(\lambda\) varies across benchmarks, reflecting their different data characteristics. SANTOS-Small reaches the best performance at \(\lambda=0.30\), indicating that a moderate variance weight complements the primary similarity signal from mean embeddings. TUS-Large, which has higher column dimensionality and sparser rows, benefits from a stronger weight \((\lambda=1.60)\), since emphasizing variance helps enforce semantic specificity and suppress spurious correlations in mean embeddings. In contrast, TUS-Small achieves the best result with a small weight \((\lambda=0.02)\), while larger values cause over-regularization. These results show that \(\lambda\) modulates the trade-off between general semantic similarity and specificity consistency, and the required balance depends on dataset scale and heterogeneity.
@@ -448,6 +456,7 @@ We evaluate the computational efficiency and scalability of our framework on dat
   \caption{Response time of index construction and table union search}
   \label{tab:scalability}
   
+  \resizebox{\columnwidth}{!}{%
   \begin{tabular}{c|c|cc}
     \toprule
     \multirow{2}{*}{Corpus} & \multirow{2}{*}{\#Tabs}& \multicolumn{2}{c}{Time} \\
@@ -459,7 +468,8 @@ We evaluate the computational efficiency and scalability of our framework on dat
     SANTOS Large & 11,065 & 0.0029& 0.041 \\
     WDC (1M)& 1,000,000 & 0.2154& 3.819 \\
     \bottomrule
-  \end{tabular}
+  \end{tabular}%
+  }%
 \end{table}
 
 The empirical results demonstrate a high degree of scalability for online table union search. Even with full-context serialization, the encoding complexity remains bounded by the constant model overhead rather than data volume. Specifically, the encoding time remains stable at approximately 6.6 ms per column at most. Furthermore, the index construction of {Flat Vector Index} for one million tables completes in merely 0.215 seconds. On the largest dataset (WDC Sample, 1M tables), the system maintains an average latency of {3.82 ms}. The FAISS Flat Index maintains millisecond-level retrieval latency in our setting ~\cite{johnson2019billion,aumuller2020ann}.
@@ -473,18 +483,18 @@ To intuitively understand the superiority of DGGC in handling semantic specifici
 
 \begin{figure}[!htpb]
     \centering
-    \includegraphics[width=1\linewidth]{figure/case_study.pdf}
+    \includegraphics[width=\columnwidth]{figure/case_study.pdf}
     \caption{A case study of table union search: (a) The query table about ``Wholesale Markets''; (b) The returned table of DGGC w/o Var, which is a restaurant \& retail table due to its high lexical overlap with the query table (e.g., ``Market'', ``Type''); (c) The returned table of DGGC, which is a true positive containing markets with public wholesale type.}
     \label{fig:casestudy}
 \end{figure}
 
 As illustrated in Figure \ref{fig:casestudy} and Figure \ref{fig:case_study_epoch}, DGGC w/o Var retrieves a ``Restaurant \& Retail'' table, which is misled by severe value-level lexical overlap (estimated Jaccard similarity $\approx 0.42$ over normalized value tokens). The overlapping strings, such as ``Hunts Point Meat Market'' vs. ``Boston Market'' and ``License Type'' vs. ``Business Type'', create a high similarity between the two tables. At Epoch 1, the cosine similarity between the query table and this hard negative sample is notably high at 0.982. However, as training progresses, this similarity significantly drops to 0.2138 by Epoch 30. The overall MAP@k of DGGC w/o Var reaches its peak at Epoch 2 but subsequently begins to decline. This deterioration can be attributed to the model's neglect of semantic specificity due to the absence of a variance constraint. As a result, the model overfits to superficial lexical overlap, leading to a gradual decrease in MAP@k performance, which falls from 0.9346 to 0.7054.
 
-\begin{figure}[!htpb]
+\begin{figure*}[t]
     \centering
-    \includegraphics[width=.75\linewidth]{figure/case_study_epoch.pdf}
+    \includegraphics[width=\textwidth]{figure/case_study_epoch.pdf}
     \caption{The trend of cosine similarity between the query table and the hard negative sample, together with the total MAP, as the training epoch changes for DGGC w/o Var and DGGC. The light orange and light green vertical lines denote the epochs where the respective models achieve their optimal MAP performance.}
     \label{fig:case_study_epoch}
-\end{figure}
+\end{figure*}
 
 In contrast, the DGGC model, which incorporates variance embeddings to account for semantic specificity, effectively captures the inconsistency in table semantics illustrated in Figure \ref{fig:casestudy} (a) and (b). While both tables pertain to market entities, the query table emphasizes public wholesale markets, whereas Figure \ref{fig:casestudy} (b) focuses on more general restaurant and retail contexts. The variance embedding in the loss function sensitively detects this mismatch. During training, the variance penalty term $\lambda\|\sigma_q-\sigma_n\|_2^2$ lowers the compatibility score of candidates with inconsistent semantic specificity, even when their mean embeddings are close to the query. As a result, DGGC significantly reduces the cosine similarity between the query table and the hard negative sample from 0.9977 to 0.3561, corresponding to a 64.3\% decrease, while maintaining robust global performance, with MAP@k peaking at 0.9925. This qualitative result validates that introducing the variance constraint enables the model to distinguish genuine semantic alignment \cite{karpukhin2020dense} from superficial lexical similarity \cite{robertson2009probabilistic}, which is critical for effective retrieval in real-world data lakes.

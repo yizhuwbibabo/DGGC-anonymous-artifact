@@ -27,3 +27,17 @@ The following supplied files were copied byte-for-byte (the Related Work filenam
 - `references.bib`, containing exactly the 55 active citation entries selected from the supplied `sample-base.bib` after bidirectional cross-checking.
 
 No placeholder bibliography or invented references were added. The 118 supplied but uncited entries were excluded from `references.bib` and listed in `REFERENCE_CROSSCHECK.md` for auditability.
+
+## Figure and table layout changes
+
+- Table-like PDFs (intro_example.pdf and case_study.pdf) are included as
+  single-column figures at \\columnwidth.
+- Diagram/chart PDFs (overview.pdf, ablation_study.pdf, and
+  case_study_epoch.pdf) are included as two-column figure* floats at
+  \\textwidth (the ablation chart uses .99\\textwidth to remove a
+  float-height overflow warning).
+- Every active tabular environment in sections/Experiment.tex is constrained
+  to \\columnwidth with \\resizebox; no table text, numbers, captions, labels,
+  or ordering were changed.
+
+See FIGURE_LAYOUT_CHANGELOG.md for the file-by-file audit and build check.

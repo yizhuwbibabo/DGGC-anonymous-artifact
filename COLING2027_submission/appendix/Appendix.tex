@@ -31,7 +31,7 @@ The details of our baselines are listed as follows:
 \begin{figure}
     \centering
   
-    \includegraphics[width=1\linewidth]{figure/case_study.pdf}
+    \includegraphics[width=\columnwidth]{figure/case_study.pdf}
     \caption{A case study of table union search: (a) The query table about ``Wholesale Markets''; (b) The returned table of DGGC w/o Var, which is a restaurant \& retail table due to its high lexical overlap with the query table (e.g., ``Market'', ``Type''); (c) The returned table of DGGC, which is a true positive containing markets with public whole sale type. }
     \label{fig:casestudy}
    
@@ -51,12 +51,12 @@ To intuitively understand the superiority of DGGC in handling semantic specifici
 
 As illustrated in Figure \ref{fig:casestudy} and Figure \ref{fig:case_study_epoch}, the DGGC w/o Var retrieves a ``Restaurant \& Retail'' table, which is misled by severe value-level lexical overlap (estimated Jaccard similarity $\approx 0.42$). The overlapping strings, such as ``Hunts Point Meat Market'' vs ``Boston Market'', ``License Type'' vs ``Business Type'' create a high similarity between two tables. At Epoch 1, the cosine similarity between negative samples is notably high at 0.982. However, as training progresses, this similarity significantly drops to 0.2138 by Epoch 30. The overall MAP@k reaches its peak at Epoch 2 but subsequently begins to decline. This deterioration can be attributed to the model's neglect of semantic specificity due to the absence of a variance constraint. As a result, the model overfits to noise, leading to a gradual decrease in MAP@k performance, which falls from 0.9346 to 0.7054.
 
-\begin{figure}[!htpb]
+\begin{figure*}[t]
     \centering
-    \includegraphics[width=.75\linewidth]{figure/case_study_epoch.pdf}
+    \includegraphics[width=\textwidth]{figure/case_study_epoch.pdf}
     \caption{The trend of cosine similarity among negative samples and the total MAP with the change of training epoch for the DGGC w/o Var and DGGC model. The light orange and light green vertical lines denote the epochs where the respective models achieve their optimal MAP performance. }
     \label{fig:case_study_epoch}
-\end{figure}
+\end{figure*}
 
 In contrast, the DGGC model, which incorporates variance embeddings to account for semantic specificity, effectively captures the inconsistencies in table semantics illustrated in Figure \ref{fig:casestudy} (a) and (b). While both tables pertain to market entities, the query table emphasizes public wholesale markets, whereas Figure \ref{fig:casestudy} (b) focuses on more general contexts. The variance embedding in the loss function sensitively detects this mismatch. During training, the penalty term ($\lambda |\sigma_q - \sigma_n|_2$) in loss function actively separates the semantic centers, resulting in a significant reduction in cosine similarity from 0.9977 to 0.3561 (a 64.3\% decrease) between the tables while maintaining robust global performance, with MAP@k peaking at 0.9925. This successful filtering validates that introducing the variance constraint enables the model to distinguish between genuine semantic alignment \cite{karpukhin2020dense} and superficial lexical similarity \cite{robertson2009probabilistic}, which is critical for effective retrieval in real-world data lakes.
 

@@ -4,14 +4,14 @@ In this section, we define the task and present our proposed Dual-Granularity Ga
 
 \subsection{Task Definition}
 \label{sub_pre}
-\begin{figure}[t]
+\begin{figure*}[t]
     \centering
-    \includegraphics[width=1\linewidth]{figure/overview.pdf}
+    \includegraphics[width=\textwidth]{figure/overview.pdf}
    \caption{
 \textbf{The framework of DGGC.} DGGC encodes tables and columns into mean and variance embeddings, uses a filter-shuffle mechanism to generate cross-table positives, and optimizes Gaussian-specific losses for online unionability ranking.
 }
     \label{fig:over}
-\end{figure}
+\end{figure*}
 Following SANTOS~\cite{khatiwada2023santos}, we adopt a relationship-based semantic definition of unionability. A table is a set of columns $\{c_1,\dots,c_n\}$, each possibly from a distinct domain. Given a query table $q$ and candidate table $t$, $t$ is unionable with $q$ if columns in $q$ can be one-to-one matched to a subset of columns in $t$ while preserving semantic types and inter-column relationships. Accordingly, $U(q,t)$ denotes the semantic unionability degree of $t$ with respect to $q$.
 Given a query table $q$ and a table corpus ${T}$, table union search aims to return a top-$k$ list of tables $\{t_1,\dots,t_k\}$ from ${T}$, such that $\forall t\in\{t_1,\dots,t_k\}$ and $\forall t'\in {T}\backslash \{t_1,\dots,t_k\}$, $U(q,t)\geq U(q,t')$.
 \subsection{Dual-Granularity Gaussian Encoder}
