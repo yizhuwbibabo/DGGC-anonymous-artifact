@@ -33,9 +33,10 @@ No placeholder bibliography or invented references were added. The 118 supplied 
 - Table-like PDFs (intro_example.pdf and case_study.pdf) are included as
   single-column figures at the column width.
 - Diagram/chart PDFs (overview.pdf, ablation_study.pdf, and
-  case_study_epoch.pdf) are included as two-column figure-star floats at
-  the full text width (the ablation chart uses 99% of the full text width
-  to remove a float-height overflow warning).
+  case_study_epoch.pdf) are included as two-column figure-star floats. The
+  overview uses the full text width, the ablation chart uses 99% of the full
+  text width, and the epoch plot uses 90% centered text width to keep the
+  complete main text within eight pages.
 - Every active tabular environment in sections/Experiment.tex is constrained
   to the column width with a resize wrapper; no table text, numbers, captions,
   labels, or ordering were changed.
