@@ -10,7 +10,7 @@ import os
 
 import random
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -64,7 +64,7 @@ def safe_read_csv(path: str, sample_rows: int = 50) -> Optional[pd.DataFrame]:
 
     return None
 
-def serialize_table(df: pd.DataFrame, max_rows: int = 3, max_cols: int = 12) -> str:
+def serialize_table(df: pd.DataFrame, max_rows: int = 3, max_cols: int = 12, input_mode: str = "full") -> str:
 
     if df is None or df.empty or len(df.columns) == 0:
 
@@ -80,7 +80,17 @@ def serialize_table(df: pd.DataFrame, max_rows: int = 3, max_cols: int = 12) -> 
 
         val_str = " | ".join(vals[:max_rows])
 
-        parts.append(f"header: {col} values: {val_str} [SEP]")
+        if input_mode == "header":
+
+            parts.append(f"header: {col} [SEP]")
+
+        elif input_mode == "value":
+
+            parts.append(f"values: {val_str} [SEP]")
+
+        else:
+
+            parts.append(f"header: {col} values: {val_str} [SEP]")
 
     return " ".join(parts).strip() if parts else "empty_table [SEP]"
 
@@ -108,6 +118,12 @@ class PerColumnTableDataset(Dataset):
 
         self_aug_prob: float = 0.10,
 
+        num_positives: int = 4,
+
+        shuffle_ratio: float = 0.30,
+
+        input_mode: str = "full",
+
     ) -> None:
 
         self.data_dir = data_dir
@@ -125,6 +141,12 @@ class PerColumnTableDataset(Dataset):
         self.min_semantic_positive_score = min_semantic_positive_score
 
         self.self_aug_prob = self_aug_prob
+
+        self.num_positives = num_positives
+
+        self.shuffle_ratio = shuffle_ratio
+
+        self.input_mode = input_mode
 
         self.table_files = sorted(os.path.basename(p) for p in glob.glob(os.path.join(data_dir, "*.csv")))
 
@@ -224,9 +246,31 @@ class PerColumnTableDataset(Dataset):
 
         return None
 
-    def _build_positive_index(self) -> Dict[str, List[str]]:
+    def _entry_matches(self, entry: Any) -> List[Tuple[str, str]]:
 
-        out: Dict[str, List[str]] = {}
+        if not isinstance(entry, dict):
+
+            return []
+
+        out: List[Tuple[str, str]] = []
+
+        for m in entry.get("matched_columns", []) or []:
+
+            if isinstance(m, dict) and m.get("left") and m.get("right"):
+
+                out.append((str(m["left"]), str(m["right"])))
+
+        return out
+
+    def _build_positive_index(self) -> Dict[str, List[Tuple[float, str, List[Tuple[str, str]]]]]:
+
+        # For each anchor table keep (filtering score, positive table, aligned
+
+        # column pairs). The score drives confidence-aware positive sampling
+
+        # and the aligned pairs drive the shuffling phase (Sec. 3.4).
+
+        rich: Dict[str, List[Tuple[float, str, List[Tuple[str, str]]]]] = {}
 
         valid = set(self.table_files)
 
@@ -246,7 +290,7 @@ class PerColumnTableDataset(Dataset):
 
                 continue
 
-            pos: List[str] = []
+            best: Dict[str, Tuple[float, str, List[Tuple[str, str]]]] = {}
 
             for e in entries:
 
@@ -254,13 +298,21 @@ class PerColumnTableDataset(Dataset):
 
                 if p and p in valid and p != a and self._entry_score(e) >= self.min_semantic_positive_score:
 
-                    pos.append(p)
+                    sc = self._entry_score(e)
 
-            if pos:
+                    if p not in best or sc > best[p][0]:
 
-                out[a] = sorted(set(pos))
+                        best[p] = (sc, p, self._entry_matches(e))
 
-        return out
+            if best:
+
+                rich[a] = sorted(best.values(), key=lambda x: x[0], reverse=True)
+
+        sets: Dict[str, set] = {a: set(v[1] for v in vals) for a, vals in rich.items()}
+
+        self.positive_sets = sets
+
+        return rich
 
     def __len__(self) -> int:
 
@@ -284,25 +336,77 @@ class PerColumnTableDataset(Dataset):
 
         return df2
 
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+    def _shuffle_view(self, anchor_df: pd.DataFrame, pos_df: pd.DataFrame, aligned_pairs: List[Tuple[str, str]], ratio: float = 0.30) -> pd.DataFrame:
+
+        """Shuffling phase (Sec. 3.4): for r rounds, where r is `ratio` times
+
+        the number of rows of the smaller table, a row of the anchor table is
+
+        paired with a randomly sampled row of the positive table and the
+
+        values of the aligned columns in the anchor row are replaced by the
+
+        values of the sampled row. Columns outside the alignment are never
+
+        touched. Note: both dataframes are cached with at most
+
+        `csv_cache_rows` rows, so r is computed on the cached tables."""
+
+        df = anchor_df.copy()
+
+        pairs = [(l, r) for (l, r) in (aligned_pairs or []) if l in df.columns and r in pos_df.columns]
+
+        if not pairs or len(df) == 0 or len(pos_df) == 0:
+
+            return df
+
+        r_rounds = max(1, int(round(ratio * min(len(df), len(pos_df)))))
+
+        a_loc = {l: df.columns.get_loc(l) for l, _ in pairs}
+
+        p_loc = {rc: pos_df.columns.get_loc(rc) for _, rc in pairs}
+
+        for _ in range(r_rounds):
+
+            tgt = random.randrange(len(df))
+
+            src = random.randrange(len(pos_df))
+
+            for l, rc in pairs:
+
+                df.iat[tgt, a_loc[l]] = pos_df.iat[src, p_loc[rc]]
+
+        return df
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
 
         anchor = self.table_files[idx]
 
         anchor_df = self.df_cache[anchor]
 
-        use_self = random.random() < self.self_aug_prob or anchor not in self.positive_index
+        cands = self.positive_index.get(anchor)
 
-        if use_self:
+        texts = [serialize_table(anchor_df, self.max_rows, self.max_cols, self.input_mode)]
 
-            pos_df = self._augment_self(anchor_df)
+        for _ in range(self.num_positives):
 
-        else:
+            use_self = random.random() < self.self_aug_prob or not cands
 
-            pos_file = random.choice(self.positive_index[anchor])
+            if use_self:
 
-            pos_df = self.df_cache[pos_file]
+                pos_df = self._augment_self(anchor_df)
 
-        texts = [serialize_table(anchor_df, self.max_rows, self.max_cols), serialize_table(pos_df, self.max_rows, self.max_cols)]
+            else:
+
+                # Confidence-aware sampling: strongly aligned pairs are
+
+                # sampled more often; then apply the shuffling phase.
+
+                _, pos_file, matches = random.choices(cands, weights=[c[0] for c in cands], k=1)[0]
+
+                pos_df = self._shuffle_view(anchor_df, self.df_cache[pos_file], matches, self.shuffle_ratio)
+
+            texts.append(serialize_table(pos_df, self.max_rows, self.max_cols, self.input_mode))
 
         enc = self.tokenizer(
 
@@ -318,7 +422,39 @@ class PerColumnTableDataset(Dataset):
 
         )
 
-        return {"input_ids": enc["input_ids"], "attention_mask": enc["attention_mask"]}
+        return {"input_ids": enc["input_ids"], "attention_mask": enc["attention_mask"], "anchor": anchor}
+
+
+
+def make_collate(dataset: PerColumnTableDataset):
+
+    def collate(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
+
+        input_ids = torch.stack([b["input_ids"] for b in batch])
+
+        attention_mask = torch.stack([b["attention_mask"] for b in batch])
+
+        names = [b["anchor"] for b in batch]
+
+        B = len(names)
+
+        # pos_mask[i, j] marks in-batch tables that are known positives of
+
+        # anchor i; they are excluded from the negative set of Eq. (2).
+
+        pos_mask = torch.zeros((B, B), dtype=torch.bool)
+
+        for i, n in enumerate(names):
+
+            for j, m in enumerate(names):
+
+                if i != j and m in dataset.positive_sets.get(n, ()):
+
+                    pos_mask[i, j] = True
+
+        return {"input_ids": input_ids, "attention_mask": attention_mask, "pos_mask": pos_mask, "anchor": names}
+
+    return collate
 
 def save_checkpoint(model: torch.nn.Module, output_dir: str, epoch: int) -> None:
 
@@ -346,7 +482,7 @@ def main() -> None:
 
     ap = argparse.ArgumentParser()
 
-    ap.add_argument("--model_name", default="<MODEL_NAME>")
+    ap.add_argument("--model_name", default="roberta-base")
 
     ap.add_argument("--data_dir", required=True)
 
@@ -356,7 +492,7 @@ def main() -> None:
 
     ap.add_argument("--epochs", type=int, default=10)
 
-    ap.add_argument("--batch_size", type=int, default=128)
+    ap.add_argument("--batch_size", type=int, default=64)
 
     ap.add_argument("--lr", type=float, default=1e-5)
 
@@ -364,7 +500,13 @@ def main() -> None:
 
     ap.add_argument("--projection_dim", type=int, default=128)
 
-    ap.add_argument("--temperature", type=float, default=0.07)
+    ap.add_argument("--num_positives", type=int, default=4, help="Positive views per anchor (P in Eq. 2)")
+
+    ap.add_argument("--shuffle_ratio", type=float, default=0.30, help="Shuffling rounds as a fraction of the smaller table's rows")
+
+    ap.add_argument("--input_mode", choices=["full", "header", "value"], default="full")
+
+    ap.add_argument("--no_variance", action="store_true", help="Point-embedding ablation (DGGC w/o Var)")
 
     ap.add_argument("--lambda_reg", type=float, default=0.5)
 
@@ -376,7 +518,7 @@ def main() -> None:
 
     ap.add_argument("--col_match_mode", choices=["max", "logsumexp"], default="logsumexp")
 
-    ap.add_argument("--max_length", type=int, default=160)
+    ap.add_argument("--max_length", type=int, default=128)
 
     ap.add_argument("--max_rows", type=int, default=3)
 
@@ -442,6 +584,12 @@ def main() -> None:
 
         self_aug_prob=args.self_aug_prob,
 
+        num_positives=args.num_positives,
+
+        shuffle_ratio=args.shuffle_ratio,
+
+        input_mode=args.input_mode,
+
     )
 
     loader = DataLoader(
@@ -460,6 +608,8 @@ def main() -> None:
 
         persistent_workers=args.num_workers > 0,
 
+        collate_fn=make_collate(dataset),
+
     )
 
     if len(loader) == 0:
@@ -476,6 +626,8 @@ def main() -> None:
 
         max_cols=args.max_cols,
 
+        use_variance=not args.no_variance,
+
     ).to(device)
 
     if args.compile and hasattr(torch, "compile"):
@@ -486,9 +638,7 @@ def main() -> None:
 
     loss_fn = PerColumnWassersteinContrastiveLoss(
 
-        temperature=args.temperature,
-
-        lambda_reg=args.lambda_reg,
+        lambda_reg=0.0 if args.no_variance else args.lambda_reg,
 
         alpha=args.alpha,
 
@@ -532,7 +682,7 @@ def main() -> None:
 
                 out = model(ids, mask)
 
-                loss = loss_fn(out)
+                loss = loss_fn(out, batch["pos_mask"])
 
             scaler.scale(loss).backward()
 

@@ -19,7 +19,7 @@ python src/dggc/train.py \
   --output_dir ${DGGC_WORK_DIR}/tus_small/checkpoints \
   --epochs 10 \
   --batch_size 64 \
-  --lr 8e-6
+  --lr 1e-5
 ```
 
 Example evaluation command:
@@ -30,7 +30,7 @@ python src/dggc/evaluate.py \
   --candidate_dir ${DATA_ROOT}/tus_small_benchmark/datalake \
   --query_dir ${DATA_ROOT}/tus_small_benchmark/query \
   --gt_path ${DATA_ROOT}/tus_small_benchmark/gt_tus_small.json \
-  --k 10 \
+  --ks 10 \
   --top_n 300 \
   --output_csv ${DGGC_WORK_DIR}/tus_small/eval_k10.csv
 ```

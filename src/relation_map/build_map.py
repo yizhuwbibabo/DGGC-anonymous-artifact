@@ -354,49 +354,41 @@ def profile_table(path: str, nrows: int, sample_values: int, max_cols: int) -> D
 
     }
 
-def col_match_score(ca: Dict[str, Any], cb: Dict[str, Any]) -> Dict[str, float]:
+def col_match_score(ca: Dict[str, Any], cb: Dict[str, Any], weights: Tuple[float, float, float] = (0.4, 0.3, 0.3)) -> Dict[str, float]:
 
-    hseq = seq_ratio(ca["norm_header"], cb["norm_header"])
+    # Eq. (5): A_ij = w^T s(c_i, c'_j) over three normalized signals --
 
-    hjac = jaccard(ca["header_tokens"], cb["header_tokens"])
+    # header similarity, value-token overlap, and type compatibility -- with
+
+    # weights summing to one.
+
+    hsim = seq_ratio(ca["norm_header"], cb["norm_header"])
 
     vo = value_overlap(ca["value_tokens"], cb["value_tokens"])
 
     tc = type_compat(ca["type"], cb["type"])
 
-    role = jaccard(ca.get("roles", []), cb.get("roles", []))
-
-    combined = (
-
-        0.34 * hseq +
-
-        0.22 * hjac +
-
-        0.20 * vo +
-
-        0.18 * tc +
-
-        0.06 * role
-
-    )
+    combined = weights[0] * hsim + weights[1] * vo + weights[2] * tc
 
     return {
 
         "combined": float(combined),
 
-        "header_seq": float(hseq),
-
-        "header_jaccard": float(hjac),
+        "header_sim": float(hsim),
 
         "value_overlap": float(vo),
 
-        "type_score": float(tc),
-
-        "role_score": float(role),
+        "type_compat": float(tc),
 
     }
 
-def greedy_one_to_one_matches(a: Dict[str, Any], b: Dict[str, Any], min_col_score: float) -> List[Dict[str, Any]]:
+def greedy_one_to_one_matches(a: Dict[str, Any], b: Dict[str, Any], min_col_score: float = 0.0, weights: Tuple[float, float, float] = (0.4, 0.3, 0.3)) -> List[Dict[str, Any]]:
+
+    # Greedy one-to-one column alignment: iteratively select the column pair
+
+    # with the highest compatibility (Sec. 3.4). min_col_score defaults to 0,
+
+    # i.e., pure greedy selection as described in the paper.
 
     pairs = []
 
@@ -404,7 +396,7 @@ def greedy_one_to_one_matches(a: Dict[str, Any], b: Dict[str, Any], min_col_scor
 
         for j, cb in enumerate(b["cols"]):
 
-            s = col_match_score(ca, cb)
+            s = col_match_score(ca, cb, weights)
 
             if s["combined"] >= min_col_score:
 
@@ -444,103 +436,79 @@ def greedy_one_to_one_matches(a: Dict[str, Any], b: Dict[str, Any], min_col_scor
 
     return out
 
-def table_pair_score(a: Dict[str, Any], b: Dict[str, Any], min_col_score: float) -> Tuple[float, Dict[str, Any]]:
+def table_pair_score(a: Dict[str, Any], b: Dict[str, Any], gamma: float, weights: Tuple[float, float, float] = (0.4, 0.3, 0.3)) -> Tuple[float, Dict[str, Any]]:
+
+    """Eqs. (6)-(7): M(t,t') is the average one-to-one alignment strength
+
+    over the anchor schema and f(t,t') = M(t,t') * I[M(t,t') > gamma]."""
 
     if a["ncols"] == 0 or b["ncols"] == 0:
 
         return 0.0, {}
 
-    matches = greedy_one_to_one_matches(a, b, min_col_score=min_col_score)
+    matches = greedy_one_to_one_matches(a, b, min_col_score=0.0, weights=weights)
 
-    m = len(matches)
-
-    if m == 0:
+    if not matches:
 
         return 0.0, {}
 
-    avg_match = sum(x["combined"] for x in matches) / m
+    n_anchor = max(1, a["ncols"])
 
-    min_cols = max(1, min(a["ncols"], b["ncols"]))
+    M = sum(x["combined"] for x in matches) / n_anchor
 
-    max_cols = max(1, max(a["ncols"], b["ncols"]))
-
-    coverage_min = m / min_cols
-
-    coverage_max = m / max_cols
-
-    topic = jaccard(a["tokens"], b["tokens"])
-
-    semantic_score = (
-
-        0.58 * avg_match +
-
-        0.18 * math.sqrt(max(0.0, coverage_min)) +
-
-        0.12 * coverage_max +
-
-        0.12 * topic
-
-    )
-
-    confidence = (
-
-        0.60 * avg_match +
-
-        0.25 * coverage_min +
-
-        0.15 * topic
-
-    )
+    f = M if M > gamma else 0.0
 
     evidence = {
 
         "matched_columns": matches,
 
-        "matched_count": m,
+        "matched_count": len(matches),
 
         "left_columns": a["ncols"],
 
         "right_columns": b["ncols"],
 
-        "avg_match_score": float(avg_match),
+        "alignment_strength": float(M),
 
-        "coverage_min": float(coverage_min),
+        "avg_match": float(M),
 
-        "coverage_max": float(coverage_max),
+        "semantic_score": float(f),
 
-        "topic_score": float(topic),
+        "score": float(f),
 
-        "semantic_score": float(semantic_score),
-
-        "confidence": float(confidence),
+        "confidence": float(f),
 
     }
 
-    return float(semantic_score), evidence
+    return float(f), evidence
 
 _G_PROFILES: List[Dict[str, Any]] = []
 
 _G_NAMES: List[str] = []
 
-_G_MIN_COL_SCORE: float = 0.45
+_G_TAU: float = 0.65
 
-_G_THRESHOLD: float = 0.30
+_G_GAMMA: float = 0.10
 
-_G_MIN_AVG_MATCH_SCORE: float = 0.55
+_G_WEIGHTS: Tuple[float, float, float] = (0.4, 0.3, 0.3)
 
-def _init_worker(profiles, min_col_score, threshold, min_avg_match_score):
 
-    global _G_PROFILES, _G_NAMES, _G_MIN_COL_SCORE, _G_THRESHOLD, _G_MIN_AVG_MATCH_SCORE
+
+def _init_worker(profiles, tau, gamma, weights):
+
+    global _G_PROFILES, _G_NAMES, _G_TAU, _G_GAMMA, _G_WEIGHTS
 
     _G_PROFILES = profiles
 
     _G_NAMES = [p["name"] for p in profiles]
 
-    _G_MIN_COL_SCORE = min_col_score
+    _G_TAU = tau
 
-    _G_THRESHOLD = threshold
+    _G_GAMMA = gamma
 
-    _G_MIN_AVG_MATCH_SCORE = min_avg_match_score
+    _G_WEIGHTS = weights
+
+
 
 def _score_anchor(args):
 
@@ -558,17 +526,17 @@ def _score_anchor(args):
 
         b = _G_PROFILES[j]
 
-        score, ev = table_pair_score(a, b, min_col_score=_G_MIN_COL_SCORE)
+        # Eqs. (6)-(7): f(t,t') = M(t,t') * I[M(t,t') > gamma]; a pair is
+
+        # retained only if f(t,t') > tau (top-K capping happens at the end).
+
+        score, ev = table_pair_score(a, b, gamma=_G_GAMMA, weights=_G_WEIGHTS)
 
         if not ev:
 
             continue
 
-        if score < _G_THRESHOLD:
-
-            continue
-
-        if ev.get("avg_match_score", 0.0) < _G_MIN_AVG_MATCH_SCORE:
+        if score <= _G_TAU:
 
             continue
 
@@ -712,11 +680,11 @@ def main():
 
     ap.add_argument("--workers", type=int, default=min(10, os.cpu_count() or 2))
 
-    ap.add_argument("--threshold", type=float, default=0.30)
+    ap.add_argument("--tau", type=float, default=0.65, help="Minimum filtering score f(t,t') for a retained pair")
 
-    ap.add_argument("--min_col_score", type=float, default=0.45)
+    ap.add_argument("--gamma", type=float, default=0.10, help="Minimum alignment strength M(t,t')")
 
-    ap.add_argument("--min_avg_match_score", type=float, default=0.55)
+    ap.add_argument("--col_weights", default="0.4,0.3,0.3", help="Weights (header, value, type) for Eq. (5); must sum to 1")
 
     ap.add_argument("--min_shared_block", type=int, default=1)
 
@@ -724,13 +692,15 @@ def main():
 
     ap.add_argument("--max_candidates_per_table", type=int, default=500)
 
-    ap.add_argument("--max_neighbors_per_table", type=int, default=300)
+    ap.add_argument("--K", type=int, default=16, help="Retained-neighbor width (top-K candidates per anchor)")
 
     ap.add_argument("--profile_cache", default=None)
 
     ap.add_argument("--candidate_cache", default=None)
 
     args = ap.parse_args()
+
+    weights = tuple(float(x) for x in args.col_weights.split(","))
 
     t0 = time.time()
 
@@ -770,9 +740,11 @@ def main():
 
     print(f"nrows/sample_values/max_cols: {args.nrows}/{args.sample_values}/{args.max_cols}")
 
-    print(f"threshold                 : {args.threshold}")
+    print(f"tau                       : {args.tau}")
 
-    print(f"min_col_score             : {args.min_col_score}")
+    print(f"gamma                     : {args.gamma}")
+
+    print(f"col_weights               : {args.col_weights}")
 
     print(f"min_avg_match_score       : {args.min_avg_match_score}")
 
@@ -850,7 +822,7 @@ def main():
 
         initializer=_init_worker,
 
-        initargs=(profiles, args.min_col_score, args.threshold, args.min_avg_match_score),
+        initargs=(profiles, args.tau, args.gamma, weights),
 
     ) as ex:
 
@@ -896,7 +868,7 @@ def main():
 
         ordered = sorted(best.values(), key=lambda x: x.get("semantic_score", x.get("score", 0.0)), reverse=True)
 
-        final[k] = ordered[: args.max_neighbors_per_table]
+        final[k] = ordered[: args.K]
 
     out_path.write_text(json.dumps(final, ensure_ascii=False, indent=2), encoding="utf-8")
 

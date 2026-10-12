@@ -74,7 +74,7 @@ def safe_read_csv(path: str, sample_rows: int) -> Optional[pd.DataFrame]:
 
     return None
 
-def serialize_table(df: pd.DataFrame, max_rows: int = 3, max_cols: int = 12) -> str:
+def serialize_table(df: pd.DataFrame, max_rows: int = 3, max_cols: int = 12, input_mode: str = "full") -> str:
 
     if df is None or df.empty or len(df.columns) == 0:
 
@@ -82,19 +82,31 @@ def serialize_table(df: pd.DataFrame, max_rows: int = 3, max_cols: int = 12) -> 
 
     df = df.astype(str).fillna("")
 
-    parts = []
+    parts: List[str] = []
 
     for col in list(df.columns)[:max_cols]:
 
         vals = [str(v).strip() for v in df[col].tolist()[:max_rows] if str(v).strip()]
 
-        parts.append(f"header: {col} values: {' | '.join(vals[:max_rows])} [SEP]")
+        val_str = " | ".join(vals[:max_rows])
+
+        if input_mode == "header":
+
+            parts.append(f"header: {col} [SEP]")
+
+        elif input_mode == "value":
+
+            parts.append(f"values: {val_str} [SEP]")
+
+        else:
+
+            parts.append(f"header: {col} values: {val_str} [SEP]")
 
     return " ".join(parts).strip() if parts else "empty_table [SEP]"
 
 class CsvRecordDataset(Dataset):
 
-    def __init__(self, records: Sequence[Tuple[str, str]], tokenizer, max_length: int, max_rows: int, max_cols: int, csv_nrows: int):
+    def __init__(self, records: Sequence[Tuple[str, str]], tokenizer, max_length: int, max_rows: int, max_cols: int, csv_nrows: int, input_mode: str = "full"):
 
         self.records = list(records)
 
@@ -108,6 +120,8 @@ class CsvRecordDataset(Dataset):
 
         self.csv_nrows = csv_nrows
 
+        self.input_mode = input_mode
+
     def __len__(self) -> int:
 
         return len(self.records)
@@ -118,7 +132,7 @@ class CsvRecordDataset(Dataset):
 
         df = safe_read_csv(path, self.csv_nrows)
 
-        text = serialize_table(df, self.max_rows, self.max_cols) if df is not None else "empty_table [SEP]"
+        text = serialize_table(df, self.max_rows, self.max_cols, self.input_mode) if df is not None else "empty_table [SEP]"
 
         enc = self.tokenizer(text, max_length=self.max_length, padding="max_length", truncation=True, return_tensors="pt")
 
@@ -342,7 +356,29 @@ def eval_ranking(all_indices: np.ndarray, query_files: List[str], candidate_file
 
     return rows
 
-def gpu_greedy_match_scores(q, c, all_indices: np.ndarray, device: torch.device, block_pairs: int = 131072, lambda_reg: float = 0.5) -> np.ndarray:
+def hungarian_union_scores(q, c, all_indices, device, block_pairs: int = 4096, lambda_reg: float = 0.5) -> np.ndarray:
+
+    """Rerank stage-1 candidates with the unionability score of Eq. (8):
+
+    U(q,t) = exp(G(q,t)) * min_{(c',c) in B} exp(G(c',c)), where B is the
+
+    maximum-weight bipartite matching on exp(G(c',c)) edge weights computed
+
+    with the Hungarian algorithm. Ranking by U equals ranking by
+
+    log U = G(q,t) + min_{(c',c) in B} G(c',c), which is used here for
+
+    numerical stability; shifting G by a constant does not change the
+
+    maximizing matching, so exp(G - max G) is used as matching weights."""
+
+    try:
+
+        from scipy.optimize import linear_sum_assignment
+
+    except ImportError as e:
+
+        raise RuntimeError("The Hungarian rerank requires scipy (pip install scipy)") from e
 
     n_q, top_n = all_indices.shape
 
@@ -352,7 +388,7 @@ def gpu_greedy_match_scores(q, c, all_indices: np.ndarray, device: torch.device,
 
     valid = c_ids >= 0
 
-    scores_out = np.full((len(c_ids),), -1e9, dtype="float32")
+    scores_out = np.full((len(c_ids),), -np.inf, dtype="float32")
 
     q_ids = q_ids[valid]
 
@@ -382,7 +418,7 @@ def gpu_greedy_match_scores(q, c, all_indices: np.ndarray, device: torch.device,
 
     with torch.no_grad():
 
-        for s in tqdm(range(0, len(q_ids), block_pairs), desc="Per-column greedy rerank", leave=False):
+        for s in tqdm(range(0, len(q_ids), block_pairs), desc="Hungarian rerank", leave=False):
 
             e = min(s + block_pairs, len(q_ids))
 
@@ -390,65 +426,43 @@ def gpu_greedy_match_scores(q, c, all_indices: np.ndarray, device: torch.device,
 
             ci = torch.from_numpy(c_ids_valid[s:e].astype("int64")).to(device)
 
-            table_ip = (q_mu_t[qi] * c_mu_t[ci]).sum(dim=-1)
+            table_score = -(
 
-            table_sig = torch.linalg.norm(q_sig_t[qi] - c_sig_t[ci], dim=-1)
+                ((q_mu_t[qi] - c_mu_t[ci]) ** 2).sum(-1)
 
-            table_score = table_ip - lambda_reg * table_sig
+                + lambda_reg * ((q_sig_t[qi] - c_sig_t[ci]) ** 2).sum(-1)
 
-            sim = torch.einsum("pcd,ped->pce", q_mu[qi], c_mu[ci])
+            )
 
-            dist = torch.linalg.norm(q_sig[qi, :, None, :] - c_sig[ci, None, :, :], dim=-1)
+            col_g = -(
 
-            mat = sim - lambda_reg * dist
+                ((q_mu[qi][:, None, :, None, :] - c_mu[ci][:, None, None, :, :]) ** 2).sum(-1)
 
-            valid_mat = (q_mask[qi, :, None] > 0) & (c_mask[ci, None, :] > 0)
+                + lambda_reg * ((q_sig[qi][:, None, :, None, :] - c_sig[ci][:, None, None, :, :]) ** 2).sum(-1)
 
-            mat = mat.masked_fill(~valid_mat, -1e4)
+            ).squeeze(1)
 
-            P, Cq, Cc = mat.shape
+            valid_mat = (q_mask[qi][:, :, None] > 0) & (c_mask[ci][:, None, :] > 0)
 
-            matched = []
+            col_g = col_g.masked_fill(~valid_mat, -1e4)
 
-            work = mat.clone()
+            col_g_np = col_g.float().cpu().numpy()
 
-            max_steps = min(Cq, Cc)
+            tab_np = table_score.float().cpu().numpy()
 
-            for _ in range(max_steps):
+            final = np.empty_like(tab_np)
 
-                flat = work.view(P, -1)
+            for p in range(col_g_np.shape[0]):
 
-                val, arg = flat.max(dim=1)
+                g = col_g_np[p]
 
-                ok = val > -1e3
+                w = np.exp(g - g.max())
 
-                matched.append(torch.where(ok, val, torch.zeros_like(val)))
+                rows, cols = linear_sum_assignment(w, maximize=True)
 
-                row = arg // Cc
+                final[p] = tab_np[p] + (g[rows, cols].min() if len(rows) else -1e4)
 
-                col = arg % Cc
-
-                ar = torch.arange(P, device=device)
-
-                work[ar, row, :] = -1e4
-
-                work[ar, :, col] = -1e4
-
-            if matched:
-
-                m = torch.stack(matched, dim=1)
-
-                count = (m != 0).sum(dim=1).clamp_min(1)
-
-                col_score = m.sum(dim=1) / q_mask[qi].sum(dim=1).clamp_min(1)
-
-            else:
-
-                col_score = torch.zeros_like(table_score)
-
-            final = 0.5 * table_score + 0.5 * col_score
-
-            scores_out[out_pos[s:e]] = final.float().cpu().numpy()
+            scores_out[out_pos[s:e]] = final
 
     return scores_out.reshape(n_q, top_n)
 
@@ -478,7 +492,7 @@ def main() -> None:
 
     ap.add_argument("--batch_size", type=int, default=256)
 
-    ap.add_argument("--max_length", type=int, default=160)
+    ap.add_argument("--max_length", type=int, default=128)
 
     ap.add_argument("--max_rows", type=int, default=3)
 
@@ -488,7 +502,11 @@ def main() -> None:
 
     ap.add_argument("--projection_dim", type=int, default=128)
 
-    ap.add_argument("--rerank", choices=["faiss_only", "percol_greedy"], default="faiss_only")
+    ap.add_argument("--rerank", choices=["faiss_only", "hungarian"], default="hungarian")
+
+    ap.add_argument("--input_mode", choices=["full", "header", "value"], default="full")
+
+    ap.add_argument("--no_variance", action="store_true", help="Point-embedding ablation (DGGC w/o Var)")
 
     ap.add_argument("--lambda_reg", type=float, default=0.5)
 
@@ -512,9 +530,9 @@ def main() -> None:
 
     c_files = [x[0] for x in cand_records]
 
-    q_loader = DataLoader(CsvRecordDataset(query_records, tokenizer, args.max_length, args.max_rows, args.max_cols, args.csv_nrows), batch_size=args.batch_size, shuffle=False, num_workers=0, pin_memory=use_cuda)
+    q_loader = DataLoader(CsvRecordDataset(query_records, tokenizer, args.max_length, args.max_rows, args.max_cols, args.csv_nrows, args.input_mode), batch_size=args.batch_size, shuffle=False, num_workers=0, pin_memory=use_cuda)
 
-    c_loader = DataLoader(CsvRecordDataset(cand_records, tokenizer, args.max_length, args.max_rows, args.max_cols, args.csv_nrows), batch_size=args.batch_size, shuffle=False, num_workers=0, pin_memory=use_cuda)
+    c_loader = DataLoader(CsvRecordDataset(cand_records, tokenizer, args.max_length, args.max_rows, args.max_cols, args.csv_nrows, args.input_mode), batch_size=args.batch_size, shuffle=False, num_workers=0, pin_memory=use_cuda)
 
     ckpts = find_checkpoints(args.model_dir, args.eval_latest_only)
 
@@ -544,7 +562,7 @@ def main() -> None:
 
             print(f"Encoding checkpoint: {ckpt_path}", flush=True)
 
-            model = PerColumnWassersteinTableEncoder(args.model_name, args.projection_dim, tokenizer.sep_token_id, args.max_cols).to(device)
+            model = PerColumnWassersteinTableEncoder(args.model_name, args.projection_dim, tokenizer.sep_token_id, args.max_cols, use_variance=not args.no_variance).to(device)
 
             load_checkpoint_into_model(model, ckpt_path, device)
 
@@ -586,7 +604,7 @@ def main() -> None:
 
         else:
 
-            scores = gpu_greedy_match_scores(q, c, all_indices, device, lambda_reg=args.lambda_reg)
+            scores = hungarian_union_scores(q, c, all_indices, device, lambda_reg=args.lambda_reg)
 
             reranked = np.argsort(-scores, axis=1)
 
@@ -596,7 +614,7 @@ def main() -> None:
 
             for r in eval_rows:
 
-                r["mode"] = "percol_greedy"
+                r["mode"] = "hungarian"
 
         for r in eval_rows:
 

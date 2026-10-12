@@ -59,7 +59,7 @@ Set paths:
 ```bash
 export DATA_ROOT=/path/to/datasets
 export DGGC_WORK_DIR=/path/to/outputs
-export MODEL_NAME=/path/to/bert-base-uncased
+export MODEL_NAME=/path/to/roberta-base
 ```
 
 ## Run

@@ -46,6 +46,8 @@ class PerColumnWassersteinTableEncoder(nn.Module):
 
         sigma_eps: float = 1e-6,
 
+        use_variance: bool = True,
+
     ) -> None:
 
         super().__init__()
@@ -61,6 +63,14 @@ class PerColumnWassersteinTableEncoder(nn.Module):
         self.max_cols = max_cols
 
         self.sigma_eps = sigma_eps
+
+        # Ablation switch for the "w/o Var" variant: when disabled, sigma is a
+
+        # constant vector, so all variance terms in the losses and scores
+
+        # vanish and the encoder degenerates to point embeddings.
+
+        self.use_variance = use_variance
 
         self.mu_head_t = nn.Sequential(
 
@@ -252,13 +262,23 @@ class PerColumnWassersteinTableEncoder(nn.Module):
 
         mu_t = F.normalize(self.mu_head_t(cls_emb), p=2, dim=-1)
 
-        sigma_t = self.sigma_head_t(cls_emb).clamp_min(self.sigma_eps)
+        # phi_sigma(x) = softplus(x) + eps (Sec. 3.2); the head ends with Softplus.
+
+        sigma_t = self.sigma_head_t(cls_emb) + self.sigma_eps
+
+        if not self.use_variance:
+
+            sigma_t = torch.ones_like(mu_t)
 
         col_embs, col_mask = self._extract_column_embeddings(input_ids_flat, attention_mask_flat, last_hidden)
 
         mu_cols = F.normalize(self.mu_head_c(col_embs), p=2, dim=-1)
 
-        sigma_cols = self.sigma_head_c(col_embs).clamp_min(self.sigma_eps)
+        sigma_cols = self.sigma_head_c(col_embs) + self.sigma_eps
+
+        if not self.use_variance:
+
+            sigma_cols = torch.ones_like(mu_cols)
 
         mu_cols = mu_cols * col_mask.unsqueeze(-1)
 
@@ -290,11 +310,19 @@ class PerColumnWassersteinTableEncoder(nn.Module):
 
 class PerColumnWassersteinContrastiveLoss(nn.Module):
 
+    """Gaussian contrastive objectives.
+
+    L_t and L_c follow Eq. (2), a multi-positive contrastive loss over the
+
+    compatibility score G of Eq. (3); L_align is the table-column alignment
+
+    loss of Sec. 3.3. The total objective is Eq. (6):
+
+    L = L_t + alpha * L_c + beta * L_align."""
+
     def __init__(
 
         self,
-
-        temperature: float = 0.07,
 
         lambda_reg: float = 0.5,
 
@@ -310,8 +338,6 @@ class PerColumnWassersteinContrastiveLoss(nn.Module):
 
         super().__init__()
 
-        self.temperature = temperature
-
         self.lambda_reg = lambda_reg
 
         self.alpha = alpha
@@ -322,43 +348,19 @@ class PerColumnWassersteinContrastiveLoss(nn.Module):
 
         self.col_match_mode = col_match_mode
 
-        self.ce = nn.CrossEntropyLoss()
-
     def g_score(self, mu1: torch.Tensor, sigma1: torch.Tensor, mu2: torch.Tensor, sigma2: torch.Tensor) -> torch.Tensor:
 
-        sim_mu = torch.matmul(mu1, mu2.T) / self.temperature
+        """Eq. (3): G(q,t) = -||mu_q - mu_t||_2^2 - lambda * ||sigma_q - sigma_t||_2^2."""
 
-        dist_sigma = torch.cdist(sigma1, sigma2, p=2) * self.lambda_reg
+        mean_dist = torch.cdist(mu1, mu2, p=2) ** 2
 
-        return sim_mu - dist_sigma
+        var_dist = torch.cdist(sigma1, sigma2, p=2) ** 2
 
-    def column_set_score(
+        return -(mean_dist + self.lambda_reg * var_dist)
 
-        self,
+    def _best_column_scores(self, score: torch.Tensor, mask_a: torch.Tensor, mask_b: torch.Tensor) -> torch.Tensor:
 
-        mu_a: torch.Tensor,
-
-        sigma_a: torch.Tensor,
-
-        mask_a: torch.Tensor,
-
-        mu_b: torch.Tensor,
-
-        sigma_b: torch.Tensor,
-
-        mask_b: torch.Tensor,
-
-    ) -> torch.Tensor:
-
-        sim = torch.einsum("acd,bfd->abcf", mu_a, mu_b) / self.temperature
-
-        dist = torch.linalg.norm(
-
-            sigma_a[:, None, :, None, :] - sigma_b[None, :, None, :, :], dim=-1
-
-        ) * self.lambda_reg
-
-        score = sim - dist
+        # score: [N, M, Ca, Cb]; reduce each column of a to its best match in b.
 
         valid = (mask_a[:, None, :, None] > 0) & (mask_b[None, :, None, :] > 0)
 
@@ -376,50 +378,169 @@ class PerColumnWassersteinContrastiveLoss(nn.Module):
 
         best = best.masked_fill(mask_a[:, None, :] <= 0, 0.0)
 
-        denom = mask_a.sum(dim=1).clamp_min(1.0)[:, None]
+        denom = mask_a.sum(dim=-1).clamp_min(1.0)[:, None]
 
         return best.sum(dim=-1) / denom
 
+    def column_set_scores(self, mu_a, sigma_a, mask_a, mu_b, sigma_b, mask_b, chunk: int = 4) -> torch.Tensor:
+
+        """Column-level compatibility between two sets of tables: each column
+
+        of a table in `a` is matched to its best column of a table in `b`
+
+        under G (Eq. 3), and the matched scores are averaged over the columns
+
+        of the `a` table."""
+
+        N, M = mu_a.shape[0], mu_b.shape[0]
+
+        out = mu_a.new_zeros((N, M))
+
+        for s0 in range(0, N, chunk):
+
+            e0 = min(s0 + chunk, N)
+
+            mean_dist = ((mu_a[s0:e0, None, :, None, :] - mu_b[None, :, None, :, :]) ** 2).sum(-1)
+
+            var_dist = ((sigma_a[s0:e0, None, :, None, :] - sigma_b[None, :, None, :, :]) ** 2).sum(-1)
+
+            score = -(mean_dist + self.lambda_reg * var_dist)
+
+            out[s0:e0] = self._best_column_scores(score, mask_a[s0:e0], mask_b)
+
+        return out
+
     def alignment_loss(self, mu_t, sigma_t, mu_agg, sigma_agg) -> torch.Tensor:
 
-        score = torch.sum(mu_t * mu_agg, dim=-1) / self.temperature
+        """L_align = ||mu_t - mu_agg||_2^2 + lambda * ||sigma_t - sigma_agg||_2^2."""
 
-        penalty = torch.linalg.norm(sigma_t - sigma_agg, dim=-1) * self.lambda_reg
+        return (
 
-        return -(score - penalty).mean()
+            torch.linalg.norm(mu_t - mu_agg, dim=-1) ** 2
 
-    def forward(self, out: PerColumnEncoderOutput) -> torch.Tensor:
+            + self.lambda_reg * torch.linalg.norm(sigma_t - sigma_agg, dim=-1) ** 2
 
-        if out.mu_t.dim() != 3 or out.mu_t.shape[1] < 2:
+        ).mean()
 
-            raise ValueError("Training expects two views per sample: [B, 2, L].")
+    @staticmethod
 
-        labels = torch.arange(out.mu_t.shape[0], device=out.mu_t.device)
+    def _multi_positive_loss(g_pos: torch.Tensor, g_neg: torch.Tensor, neg_mask: torch.Tensor) -> torch.Tensor:
 
-        a_mu_t, p_mu_t = out.mu_t[:, 0, :], out.mu_t[:, 1, :]
+        """Eq. (2): -log( sum_p exp(G(q,t_p+)) /
 
-        a_sig_t, p_sig_t = out.sigma_t[:, 0, :], out.sigma_t[:, 1, :]
+                        (sum_p exp(G(q,t_p+)) + sum_n exp(G(q,t_n-))) ).
 
-        logits_t = self.g_score(a_mu_t, a_sig_t, p_mu_t, p_sig_t)
+        A per-anchor additive constant cancels in the ratio, so scores are
 
-        loss_t = self.ce(logits_t, labels)
+        shifted by their maximum for numerical stability."""
 
-        a_mu_c, p_mu_c = out.mu_cols[:, 0], out.mu_cols[:, 1]
+        neg_scores = g_neg.masked_fill(~neg_mask, float("-inf"))
 
-        a_sig_c, p_sig_c = out.sigma_cols[:, 0], out.sigma_cols[:, 1]
+        m = torch.maximum(g_pos.max(dim=1).values, neg_scores.max(dim=1).values)
 
-        a_mask, p_mask = out.col_mask[:, 0], out.col_mask[:, 1]
+        pos_sum = torch.exp(g_pos - m[:, None]).sum(dim=1)
 
-        logits_c = self.column_set_score(a_mu_c, a_sig_c, a_mask, p_mu_c, p_sig_c, p_mask)
+        neg_sum = torch.exp(neg_scores - m[:, None]).sum(dim=1)
 
-        loss_c = self.ce(logits_c, labels)
+        loss = -torch.log(pos_sum / (pos_sum + neg_sum))
 
-        loss_align = 0.5 * (
+        loss = torch.where(neg_mask.any(dim=1), loss, torch.zeros_like(loss))
 
-            self.alignment_loss(out.mu_t[:, 0], out.sigma_t[:, 0], out.mu_agg[:, 0], out.sigma_agg[:, 0])
+        return loss.mean()
 
-            + self.alignment_loss(out.mu_t[:, 1], out.sigma_t[:, 1], out.mu_agg[:, 1], out.sigma_agg[:, 1])
+    def forward(self, out: PerColumnEncoderOutput, pos_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+
+        # View 0 is the anchor table; views 1..P are its sampled positive
+
+        # views (filter-shuffle cross-table positives or self-augmentations).
+
+        mu_t = out.mu_t.float()
+
+        sigma_t = out.sigma_t.float()
+
+        mu_cols = out.mu_cols.float()
+
+        sigma_cols = out.sigma_cols.float()
+
+        col_mask = out.col_mask
+
+        B, V = mu_t.shape[0], mu_t.shape[1]
+
+        if V < 2:
+
+            raise ValueError("Training expects at least one positive view per sample: [B, 1+P, L].")
+
+        P = V - 1
+
+        device = mu_t.device
+
+        a_mu, a_sig = mu_t[:, 0], sigma_t[:, 0]
+
+        p_mu = mu_t[:, 1:].reshape(B * P, -1)
+
+        p_sig = sigma_t[:, 1:].reshape(B * P, -1)
+
+        if pos_mask is None:
+
+            pos_mask = torch.zeros((B, B), dtype=torch.bool, device=device)
+
+        neg_mask = (~torch.eye(B, dtype=torch.bool, device=device)) & (~pos_mask)
+
+        # Table-level loss (Eqs. 2-3).
+
+        # G between each anchor and its OWN positive views: [B, P].
+
+        p_mu_v = p_mu.view(B, P, -1)
+
+        p_sig_v = p_sig.view(B, P, -1)
+
+        g_pos = -(((a_mu[:, None, :] - p_mu_v) ** 2).sum(-1) + self.lambda_reg * ((a_sig[:, None, :] - p_sig_v) ** 2).sum(-1))
+
+        g_neg = self.g_score(a_mu, a_sig, a_mu, a_sig)
+
+        loss_t = self._multi_positive_loss(g_pos, g_neg, neg_mask)
+
+        # Column-level loss, defined analogously (Sec. 3.3).
+
+        a_cols = (mu_cols[:, 0], sigma_cols[:, 0], col_mask[:, 0])
+
+        p_cols = (
+
+            mu_cols[:, 1:].reshape(B * P, *mu_cols.shape[2:]),
+
+            sigma_cols[:, 1:].reshape(B * P, *sigma_cols.shape[2:]),
+
+            col_mask[:, 1:].reshape(B * P, *col_mask.shape[2:]),
+
+        )
+
+        # Column-level scores between each anchor and its OWN positive views:
+
+        # the pairwise matrix is [B, B*P]; keep the block-diagonal [B, P].
+
+        s_pos_full = self.column_set_scores(*a_cols, *p_cols).view(B, B, P)
+
+        idx = torch.arange(B, device=device)
+
+        s_pos = s_pos_full[idx, idx]
+
+        s_neg = self.column_set_scores(*a_cols, *a_cols)
+
+        loss_c = self._multi_positive_loss(s_pos, s_neg, neg_mask)
+
+        # Table-column alignment loss over all views.
+
+        loss_align = self.alignment_loss(
+
+            mu_t.reshape(B * V, -1),
+
+            sigma_t.reshape(B * V, -1),
+
+            out.mu_agg.reshape(B * V, -1).float(),
+
+            out.sigma_agg.reshape(B * V, -1).float(),
 
         )
 
         return loss_t + self.alpha * loss_c + self.beta * loss_align
+

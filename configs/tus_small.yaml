@@ -3,9 +3,9 @@ data_root: ${DATA_ROOT}/tus_small_benchmark
 datalake_dir: ${DATA_ROOT}/tus_small_benchmark/datalake
 query_dir: ${DATA_ROOT}/tus_small_benchmark/query
 ground_truth: ${DATA_ROOT}/tus_small_benchmark/gt_tus_small.json
-model_name: ${MODEL_NAME:-bert-base-uncased}
+model_name: ${MODEL_NAME:-roberta-base}
 batch_size: 64
-learning_rate: 8.0e-6
+learning_rate: 1.0e-5
 epochs: 10
 max_length: 128
 projection_dim: 128
